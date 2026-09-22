@@ -756,7 +756,7 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
       var t = typeSel.value;
       var dl = dealSel.value;
       var rows = homeCache.filter(function (b) {
-        var okQ = !q || (b.name || "").toLowerCase().indexOf(q) > -1 || (b.address || "").toLowerCase().indexOf(q) > -1;
+        var okQ = !q || (b.name || "").toLowerCase().indexOf(q) > -1 || (b.address || "").toLowerCase().indexOf(q) > -1 || (b.zonecode || "").indexOf(q) > -1;
         var okT = !t || b.buildingType === t;
         var okD = !dl || (b.lastDealType || "월세") === dl;
         return okQ && okT && okD;
@@ -833,7 +833,7 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
         '<div class="b-head">' +
           '<span class="tag">' + esc(buildingData.buildingType || "기타") + "</span>" +
           "<h2>" + esc(buildingData.name) + "</h2>" +
-          '<div class="addr">' + esc(buildingData.address || "주소 미상") + "</div>" +
+          '<div class="addr">' + (buildingData.zonecode ? "[" + esc(buildingData.zonecode) + "] " : "") + esc(buildingData.address || "주소 미상") + "</div>" +
         "</div>" +
         '<div class="stat-row">' +
           '<div class="stat"><div class="k">제보 수</div><div class="v">' + reports.length + "건</div></div>" +
@@ -1158,7 +1158,7 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
       var q = searchInput.value.trim().toLowerCase();
       if (!q) { resultsBox.style.display = "none"; resultsBox.innerHTML = ""; return; }
       var rows = allBuildings.filter(function (b) {
-        return (b.name || "").toLowerCase().indexOf(q) > -1 || (b.address || "").toLowerCase().indexOf(q) > -1;
+        return (b.name || "").toLowerCase().indexOf(q) > -1 || (b.address || "").toLowerCase().indexOf(q) > -1 || (b.zonecode || "").indexOf(q) > -1;
       }).slice(0, 12);
       if (!rows.length) {
         resultsBox.style.display = "";
@@ -1182,6 +1182,7 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
     // ---- 주소 검색 (다음 우편번호 서비스) ----
     var nbAddrInput = document.getElementById("nb-addr");
     var addrDupHint = document.getElementById("addr-dup-hint");
+    var pickedAddr = { road: "", zonecode: "" };
     document.getElementById("addr-search-btn").addEventListener("click", function () {
       if (typeof daum === "undefined" || !daum.Postcode) {
         toast("주소 검색 서비스를 불러오지 못했어요. 인터넷 연결을 확인해주세요.");
@@ -1189,8 +1190,13 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
       }
       new daum.Postcode({
         oncomplete: function (data) {
-          var addr = data.roadAddress || data.jibunAddress || data.address;
-          nbAddrInput.value = addr;
+          var addr = data.roadAddress || data.jibunAddress || data.address || "";
+          // 건물명이 있으면 같이 보여주고, 건물명 칸이 비어 있으면 자동으로 채워줌
+          if (data.buildingName && !document.getElementById("nb-name").value.trim()) {
+            document.getElementById("nb-name").value = data.buildingName;
+          }
+          pickedAddr = { road: addr, zonecode: data.zonecode || "" };
+          nbAddrInput.value = (pickedAddr.zonecode ? "[" + pickedAddr.zonecode + "] " : "") + addr;
           checkAddrDuplicate(addr);
         }
       }).open();
@@ -1261,7 +1267,7 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
         return;
       }
       var newName = val("nb-name").trim();
-      var newAddrBase = val("nb-addr").trim();
+      var newAddrBase = (pickedAddr.road || "").trim();
       var newAddrDetail = val("nb-addr-detail").trim();
       var newAddr = newAddrBase + (newAddrDetail ? " (" + newAddrDetail + ")" : "");
       if (mode === "existing" && !picked) {
@@ -1319,6 +1325,8 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
         buildingPromise = db.collection("buildings").add({
           name: newName,
           address: newAddr,
+          roadAddress: newAddrBase,
+          zonecode: pickedAddr.zonecode || "",
           buildingType: val("nb-type") || "기타",
           createdAt: new Date().toISOString(),
           lastReportAt: new Date().toISOString()

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>실거주 아카이브</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gowun+Batang:wght@400;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <style>
   :root {
     --bg: #eef1f5;
@@ -306,6 +307,11 @@
   }
   .field textarea { min-height: 80px; resize: vertical; }
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .addr-row { display: flex; gap: 8px; }
+  .addr-row input { flex: 1; min-width: 0; }
+  .addr-row .btn { flex-shrink: 0; white-space: nowrap; padding: 0 14px; }
+  #addr-dup-hint { margin-top: 8px; padding: 10px; border-radius: 9px; background: var(--accent-soft); border: 1px solid var(--accent); font-size: 0.85rem; }
+  #addr-dup-hint .dup-item { display: block; width: 100%; text-align: left; margin-top: 6px; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--accent); background: var(--surface); cursor: pointer; font-size: 0.85rem; }
   .check-grid { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 4px; }
   .check-grid label { display: inline-flex; align-items: center; gap: 6px; font-size: 0.86rem; }
   .mode-toggle { display: flex; gap: 8px; margin-bottom: 14px; }
@@ -1016,10 +1022,18 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
           "</div>" +
           '<div id="mode-new-panel" style="display:none">' +
             '<div class="field"><label class="main">건물명 (별칭 가능)</label><input type="text" id="nb-name" placeholder="예: 월계로 12길 나래빌"></div>' +
-            '<div class="field"><label class="main">대략적인 위치</label><input type="text" id="nb-addr" placeholder="예: 월계1동, 광운대 후문 도보 5분"></div>' +
+            '<div class="field">' +
+              '<label class="main">주소</label>' +
+              '<div class="addr-row">' +
+                '<input type="text" id="nb-addr" placeholder="주소 검색을 눌러 실제 주소를 찾아주세요" readonly>' +
+                '<button type="button" class="btn" id="addr-search-btn">주소 검색</button>' +
+              "</div>" +
+              '<input type="text" id="nb-addr-detail" placeholder="상세 위치 (선택, 예: 광운대 후문 도보 5분, 302호 등)" style="margin-top:6px">' +
+              '<div id="addr-dup-hint" style="display:none"></div>' +
+            "</div>" +
             '<div class="field"><label class="main">건물 유형</label><select id="nb-type">' + options(ROOM_TYPES) + "</select></div>" +
           "</div>" +
-          '<div class="field-error" id="err-building" style="display:none">건물을 선택하거나 새로 등록해주세요.</div>' +
+          '<div class="field-error" id="err-building" style="display:none">건물을 선택하거나, 건물명과 주소(주소 검색)를 모두 입력해서 새로 등록해주세요.</div>' +
         "</fieldset>" +
 
         '<fieldset>' +
@@ -1165,6 +1179,48 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
     }
     searchInput.addEventListener("input", paintResults);
 
+    // ---- 주소 검색 (다음 우편번호 서비스) ----
+    var nbAddrInput = document.getElementById("nb-addr");
+    var addrDupHint = document.getElementById("addr-dup-hint");
+    document.getElementById("addr-search-btn").addEventListener("click", function () {
+      if (typeof daum === "undefined" || !daum.Postcode) {
+        toast("주소 검색 서비스를 불러오지 못했어요. 인터넷 연결을 확인해주세요.");
+        return;
+      }
+      new daum.Postcode({
+        oncomplete: function (data) {
+          var addr = data.roadAddress || data.jibunAddress || data.address;
+          nbAddrInput.value = addr;
+          checkAddrDuplicate(addr);
+        }
+      }).open();
+    });
+
+    function checkAddrDuplicate(addr) {
+      addrDupHint.style.display = "none";
+      addrDupHint.innerHTML = "";
+      if (!addr || !allBuildings.length) return;
+      var norm = addr.replace(/\s+/g, "");
+      var matches = allBuildings.filter(function (b) {
+        var ba = (b.address || "").replace(/\s+/g, "");
+        return ba && (ba.indexOf(norm) > -1 || norm.indexOf(ba) > -1);
+      }).slice(0, 5);
+      if (!matches.length) return;
+      addrDupHint.style.display = "";
+      addrDupHint.innerHTML =
+        "이미 같은 주소로 등록된 건물이 있어요. 아래 건물에 제보를 추가하면 정보가 한곳에 모여요:" +
+        matches.map(function (b) {
+          return '<button type="button" class="dup-item" data-id="' + esc(b.id) + '">' + esc(b.name) + " · " + esc(b.address || "") + "</button>";
+        }).join("");
+      Array.prototype.forEach.call(addrDupHint.querySelectorAll(".dup-item"), function (el) {
+        el.addEventListener("click", function () {
+          var id = el.getAttribute("data-id");
+          var b = allBuildings.filter(function (x) { return x.id === id; })[0];
+          if (b) { picked = b; renderPicked(); setMode("existing"); }
+        });
+      });
+    }
+
     if (db) {
       db.collection("buildings").limit(500).get().then(function (snap) {
         allBuildings = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
@@ -1204,12 +1260,15 @@ window.__WOLGYE_ADMIN_EMAILS__ = ["seokwon0224@gmail.com"]; // 관리자로 인�
         document.getElementById("err-rent").style.display = "";
         return;
       }
-      var newName = val("nb-name").trim(), newAddr = val("nb-addr").trim();
+      var newName = val("nb-name").trim();
+      var newAddrBase = val("nb-addr").trim();
+      var newAddrDetail = val("nb-addr-detail").trim();
+      var newAddr = newAddrBase + (newAddrDetail ? " (" + newAddrDetail + ")" : "");
       if (mode === "existing" && !picked) {
         document.getElementById("err-building").style.display = "";
         return;
       }
-      if (mode === "new" && !newName) {
+      if (mode === "new" && (!newName || !newAddrBase)) {
         document.getElementById("err-building").style.display = "";
         return;
       }

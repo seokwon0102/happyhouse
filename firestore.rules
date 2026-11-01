@@ -1,0 +1,56 @@
+rules_version = '2';
+
+// 가게 매출노트 보안 규칙
+// - 사장님(ownerEmail)과 초대받은 직원만 데이터를 읽고 쓸 수 있습니다.
+// - 메뉴·영업시간(settings)과 직원 관리(invites, members)는 사장님만 바꿀 수 있습니다.
+// 아래 ownerEmail() 의 이메일을 js/config.js 의 OWNER_EMAIL 과 똑같이 바꾸세요.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function ownerEmail() { return 'owner@example.com'; }
+
+    function signedIn() { return request.auth != null; }
+    function memberDoc() { return /databases/$(database)/documents/members/$(request.auth.uid); }
+    function isMember() { return signedIn() && exists(memberDoc()); }
+    function isOwner() { return isMember() && get(memberDoc()).data.role == 'owner'; }
+
+    // 가게에 등록된 사람
+    match /members/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isOwner());
+      // 본인 문서만, 본인 이메일로 만들 수 있음
+      allow create: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && (
+          // 사장님: 지정한 이메일 + 인증된 이메일
+          (request.resource.data.role == 'owner'
+            && request.auth.token.email.lower() == ownerEmail().lower()
+            && request.auth.token.email_verified == true)
+          ||
+          // 직원: 사장님이 초대한 이메일
+          (request.resource.data.role == 'staff'
+            && exists(/databases/$(database)/documents/invites/$(request.auth.token.email.lower())))
+        );
+      allow update: if false;
+      allow delete: if isOwner() && request.auth.uid != uid;
+    }
+
+    // 직원 초대 (문서 id = 소문자 이메일)
+    match /invites/{email} {
+      allow read: if isOwner() || (signedIn() && request.auth.token.email.lower() == email);
+      allow create: if isOwner() && request.resource.data.role == 'staff';
+      allow update: if false;
+      allow delete: if isOwner();
+    }
+
+    // 주문 (날짜_기기 문서), 날씨
+    match /days/{id} { allow read, write: if isMember(); }
+    match /weather/{id} { allow read, write: if isMember(); }
+
+    // 메뉴·영업시간
+    match /settings/{id} {
+      allow read: if isMember();
+      allow write: if isOwner();
+    }
+  }
+}
